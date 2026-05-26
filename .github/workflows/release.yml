@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without leading v"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Test
+        run: swift test
+
+      - name: Release preflight
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          NOTARYTOOL_PROFILE: ${{ secrets.NOTARYTOOL_PROFILE }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: REQUIRE_SIGNING=1 REQUIRE_UPDATES=1 bash scripts/release-preflight.sh release
+
+      - name: Package ZIP and DMG
+        env:
+          DIFFMAC_VERSION: ${{ steps.version.outputs.version }}
+          DIFFMAC_BUILD: ${{ github.run_number }}
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: CREATE_DMG=1 bash scripts/package-app.sh release
+
+      - name: Notarize when profile is configured
+        env:
+          NOTARYTOOL_PROFILE: ${{ secrets.NOTARYTOOL_PROFILE }}
+        run: bash scripts/notarize-app.sh
+
+      - name: Generate appcast
+        env:
+          DIFFMAC_BUILD: ${{ github.run_number }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: REQUIRE_SPARKLE_SIGNATURE=1 bash scripts/generate-appcast.sh "${{ steps.version.outputs.version }}" "${{ steps.version.outputs.tag }}"
+
+      - name: Verify package artifacts
+        env:
+          DIFFMAC_VERSION: ${{ steps.version.outputs.version }}
+          DIFFMAC_BUILD: ${{ github.run_number }}
+        run: REQUIRE_DMG=1 REQUIRE_APPCAST=1 REQUIRE_SPARKLE_PUBLIC_KEY=1 REQUIRE_SPARKLE_SIGNATURE=1 bash scripts/verify-package.sh release
+
+      - name: Prepare release notes
+        run: |
+          scripts/release-notes-template.sh "${{ steps.version.outputs.version }}" > /tmp/diff-mac-release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TITLE: DIFF Mac ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes-file /tmp/diff-mac-release-notes.md \
+              --latest
+          else
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file /tmp/diff-mac-release-notes.md \
+              --latest
+          fi
+
+          gh release upload "$TAG" \
+            "dist/DIFFMac-release.zip" \
+            "dist/DIFFMac-release.dmg" \
+            "dist/appcast.xml" \
+            --clobber
