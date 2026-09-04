@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Coccinella-Labs/diff-mac/main/.github/assets/thumbnail.png" alt="diff-mac" width="100%">
+</p>
+
 ![DIFF Mac image](https://raw.githubusercontent.com/bniladridas/diff-mac/main/docs/assets/readme-hero.png)
 
 # DIFF Mac
