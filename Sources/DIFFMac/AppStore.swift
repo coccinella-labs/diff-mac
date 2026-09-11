@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class AppStore: ObservableObject {
-    @Published var repo = RepoRef(owner: "harpertoken", name: "harper")
+    @Published var repo = RepoRef(owner: "coccinella-labs", name: "harper")
     @Published var token = ""
     @Published var viewer: GitHubUser?
     @Published var mode: WorkspaceMode = .pulls {
