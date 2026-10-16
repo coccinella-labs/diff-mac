@@ -1,0 +1,86 @@
+name: Nightly Prerelease
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Package app, ZIP, and DMG
+        env:
+          DIFFMAC_BUILD: ${{ github.run_number }}
+        run: CREATE_DMG=1 bash scripts/package-app.sh release
+
+      - name: Prepare release metadata
+        id: meta
+        run: |
+          DATE="$(date -u +%Y%m%d)"
+          TAG="nightly-${DATE}"
+          TITLE="DIFF Mac Nightly ${DATE}"
+          {
+            echo "tag=${TAG}"
+            echo "title=${TITLE}"
+          } >> "$GITHUB_OUTPUT"
+          cat > /tmp/diff-mac-nightly-notes.md <<EOF
+          Nightly prerelease for DIFF Mac.
+
+          This prerelease is generated automatically from the latest main branch build.
+
+          Artifacts:
+          - DIFFMac-release.zip
+          - DIFFMac-release.dmg
+          - appcast.xml
+
+          See the stable release notes for curated changelog entries.
+          EOF
+
+      - name: Generate nightly appcast
+        env:
+          DIFFMAC_BUILD: ${{ github.run_number }}
+        run: |
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "dist/DIFF Mac.app/Contents/Info.plist")"
+          bash scripts/generate-appcast.sh "$APP_VERSION" "${{ steps.meta.outputs.tag }}"
+
+      - name: Verify package artifacts
+        run: REQUIRE_DMG=1 REQUIRE_APPCAST=1 bash scripts/verify-package.sh release
+
+      - name: Create or update nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TITLE: ${{ steps.meta.outputs.title }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes-file /tmp/diff-mac-nightly-notes.md \
+              --prerelease \
+              --latest=false
+          else
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file /tmp/diff-mac-nightly-notes.md \
+              --prerelease \
+              --latest=false
+          fi
+
+          gh release upload "$TAG" \
+            "dist/DIFFMac-release.zip" \
+            "dist/DIFFMac-release.dmg" \
+            "dist/appcast.xml" \
+            --clobber

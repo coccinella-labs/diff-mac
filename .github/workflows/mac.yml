@@ -1,0 +1,45 @@
+name: Mac
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test-package:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Package unsigned app
+        run: bash scripts/package-app.sh release
+
+      - name: Package unsigned DMG
+        run: CREATE_DMG=1 bash scripts/package-app.sh release
+
+      - name: Verify package artifacts
+        run: REQUIRE_DMG=1 bash scripts/verify-package.sh release
+
+      - name: Upload app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIFFMac-release
+          path: dist/DIFFMac-release.zip
+
+      - name: Upload app dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIFFMac-release-dmg
+          path: dist/DIFFMac-release.dmg
